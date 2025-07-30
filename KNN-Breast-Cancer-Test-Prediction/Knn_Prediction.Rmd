@@ -1,0 +1,193 @@
+---
+title: "Knn_wisc"
+author: ""
+date: "2 february 2021"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r libraries, message=FALSE, warning=FALSE, include=FALSE}
+library(knitr)
+library(BBmisc)
+library(class)
+library(tidyverse)
+library(htmltools)
+```
+
+# Breast Cancer with K-nn Algorithm
+
+Knn - inspired from **Machine Learning with R** - (Second edition)
+
+## Data collection / loading
+```{r }
+wbcd<-read.csv("wisc_bc_data.csv", stringsAsFactors = FALSE)
+
+#str(wdbc)
+#summary(wbcd)
+```
+
+## Prepare and explore the data
+
+```{r}
+#cut first column (the record ids are useless for the analysis)
+wbcd<-wbcd[,-1]
+
+print('Number of cases')
+table(wbcd$diagnosis)
+
+round(prop.table(table(wbcd$diagnosis))*100, 1)
+
+
+# Transform the test into factor
+wbcd$diagnosis<-factor(x = wbcd$diagnosis, levels = c("B", "M"), labels = c("Benign", "Malignant"))
+
+print('Proportion table')
+round(prop.table(x = table(wbcd$diagnosis))*100, 1)
+
+
+prop_diagnosis <- round(prop.table(table(wbcd$diagnosis))*100, 1)
+kable(x = prop_diagnosis, caption = "Diagnosis (%)", col.names = c("Diagnosis", "Freq."))
+
+```
+## Normalization
+Since the values do not have the same "scale", values need to be normalized
+We will see that the kNN fonction (buitl on top of the knn function) has a parameter for that.
+
+```{r}
+minmaxnorm<-function(x){
+  return( (x-min(x) ) / (max(x)-min(x) ) )
+}
+
+# minmaxnorm Example 1
+minmaxnorm(c(1,2,3,4,5))
+
+# minmaxnorm Example 2
+minmaxnorm(c(10,20,30,40,50)) # minmaxnorm(seq(from=10, to=50, by = 10) )
+
+```
+```{r}
+# Base R
+wbcd_norm1<-as.data.frame(lapply(wbcd[2:31], minmaxnorm))
+
+#BBmisc normalize
+wbcd_norm2 <- BBmisc::normalize(x = wbcd[,2:31], method="range")
+
+#tidyverse across() (replaced mutate_* family) dplyr 1.0.2
+wbcd_norm3 <-  wbcd[,2:31] %>% mutate_all(minmaxnorm)
+wbcd_norm4 <-  wbcd[,2:31] %>% mutate(across(.fns = minmaxnorm))
+wbcd_norm5 <-  wbcd[,2:31] %>% summarise(across(.cols = everything(), .fns = minmaxnorm))
+  
+identical(wbcd_norm1, wbcd_norm2)
+identical(wbcd_norm2, wbcd_norm3)
+identical(wbcd_norm3, wbcd_norm4)
+identical(wbcd_norm4, wbcd_norm5)
+
+summary(wbcd_norm1)
+
+
+
+#summarize(wbcd_n)
+```
+##Creating Training data set and Test data set
+```{r}
+wbcd_train<-wbcd_norm1[1:469,]
+wbcd_test<-wbcd_norm1[470:569,]
+
+#create labels (the "category" / the diagnostic for each record )
+
+wbcd_train_labels<-wbcd[1:469,1]
+wbcd_test_labels<-wbcd[470:569,1] # predictions will be compared to this
+
+
+```
+
+The dataset is ready. The model can now be trained
+
+
+## Training
+The knn function returns predictions for the test dataset based on the training dataset
+```{r}
+wbcd_predicted_labels <- knn(train = wbcd_train, test = wbcd_test, cl = wbcd_train_labels,k=21)
+htmltools::h3("Predicted labels for the test data set")
+head(wbcd_predicted_labels,n = 10)
+htmltools::h3("Actual labels for the test data set")
+head(wbcd_test_labels,n = 10)
+```
+## Evaluation of the model performance
+
+a first glance
+```{r}
+table(wbcd_predicted_labels)
+table(wbcd_test_labels)
+```
+
+From these tables, we see that our model predicts 63 negative results (Benign) when there are in fact just 61.
+
+Lets try to see if all the 61 have been identified in the prediction (that is to say if all begign have been identified has begnign.
+
+```{r}
+compare <- tibble(wbcd_test_labels, wbcd_predicted_labels)
+head(compare)
+
+compare_benign <- compare %>% filter(wbcd_test_labels == "Benign")
+nrow(compare_benign)
+compare_benign <- compare_benign %>% filter(wbcd_test_labels == wbcd_predicted_labels)
+nrow(compare_benign)
+
+```
+We have 61 true negatives that is to say 61 real benign that have correctly been classified as begnign by our model.
+However, our model predicted 63 begnign, hence 2 tests have been classified benign (negative) when they should not : these are false negative
+
+gmodels will help us to evaluate our model
+
+###Check the number of good prediction
+```{r}
+#install.packages("gmodels")
+library(gmodels)
+```
+
+```{r}
+# notice the upper cases
+confusion_matrix <- CrossTable(x = wbcd_test_labels, y = wbcd_predicted_labels, prop.chisq = FALSE)
+
+```
+
+
+TRUE NEG            FALSE POS
+FALSE NEG           TRUE POS
+
+
+### Accuracy
+
+(TP + TN) / (TP +TN + FP + FN)
+```{r}
+accuracy<- (confusion_matrix$t[1,1]+confusion_matrix$t[2,2])/sum(confusion_matrix$t)
+accuracy
+```
+
+##  sensitivity
+TP/(TP + FN)
+```{r}
+sensitivity <- confusion_matrix$t[2,2]/sum(confusion_matrix$t[2,])
+sensitivity
+
+#accuracy measures how well the model performs overall, while sensitivity and specificity measure how well the model performs for each specific class (positive and negative, respectively)
+```
+#Precision
+```{r}
+precision <- confusion_matrix$prop.col[2,2]
+precision
+```
+
+
+
+For a more mathematical approach, see also:
+https://daviddalpiaz.github.io/r4sl/
+
+Next => Iris Data Set
